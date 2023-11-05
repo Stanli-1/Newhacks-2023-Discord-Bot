@@ -1,9 +1,6 @@
 #this file processes messages
 import pandas as pd
 
-import discord
-from discord.ext import commands
-
 #predefine the ranking array
 input = []
 #number of preferences
@@ -44,18 +41,22 @@ sugar_scale = 1
 
 #titles of menu directories:
 chestnut_breakfast_menu = r"Chestnut_Breakfast_Menu.xlsx"
+chestnut_dinner_menu = r"Chestnut_Dinner_Menu.xlsx"
 
 #reads the excel file of all food options and returns a dataframe with relevant columns and rows (because we are lazy)
 def read_excelfile():
-  data=pd.read_excel(chestnut_breakfast_menu)
-  df=pd.DataFrame(data,columns=["Menu Item", "Serving Size", "Calories", "Saturated Fat (g)", "Carbohydrate (g)", "Sugars (g)","Protein (g)"])
-  df=df.dropna()
-  df = df[df['Serving Size'] != 'Bowl']
-  df = df[df['Serving Size'] != 'Each']
-  df=df.reset_index(drop=True)
-  df=df.drop('Serving Size', axis=1)
-  return df
+    data=pd.read_excel(chestnut_breakfast_menu)
+    df=pd.DataFrame(data,columns=["Menu Item", "Serving Size", "Calories", "Saturated Fat (g)", "Carbohydrate (g)", "Sugars (g)","Protein (g)"])
+    df=df.dropna()
+    df = df[df['Serving Size'] != 'Bowl']
+    df = df[df['Serving Size'] != 'Each']
+    df=df.reset_index(drop=True)
+    df=df.drop('Serving Size', axis=1)
 
+    #adding the empty score table
+    #df['score'] = 0.0
+    
+    return df
 
 
 #return an array of preference variables from the user
@@ -90,11 +91,36 @@ def string_to_int(input):
         return -1
     return int_output
 
+#attempt at making a new type of function
+def add_scores_df(data):
+    for i in range(len(data.axes[0])):
+        mealName = data.iat[i,0]
+        #hard coded names, in the order: Calories, Saturated Fat, Carbs, Sugars, Protein 
+        calorie = data.iat[i,1]
+        saturated_fat = data.iat[i,2]
+        carbohydrate = data.iat[i,3]
+        sugar = data.iat[i,4]
+        protein = data.iat[i,5]
+
+        data.iloc[i,7] = weight_score_formula(calorie, protein, saturated_fat, carbohydrate, sugar)
+    #for every entry in the list, if the entry is negative, map to 0-5. if the entry is positive, map to 5-10. This should map the random range that we initially created to a range from 0-10.
+    fixed_data = data
+    for i in range(len(data.axes[0])):
+        if(data.iloc[i,7]<=0):
+            #map to 0-5
+            #df['AAL'].max()
+            fixed_data.iloc[i,7] = newMap(data['score'].min(), 0, 0, 5, data.iloc[i,7])
+        else: #map to 5-10
+            fixed_data.iloc[i,7] = newMap(0, data['score'].max(), 5, 10, data.iloc[i,7])
+    
+    return data
+
+
+
 #add s scores to a new column in a dataframe
 def add_scores(data):
-    #for loop: for each row (excluding title):
-    #calculate score from the nutrients and add it to its respective column position
-    
+
+    #method 1: create an array and make it all work together
     #create an array that will store all the S values (will be used later when creating new column)
     scoreArray = [0 for i in range(len(data.axes[0]))]
 
@@ -159,23 +185,14 @@ def select_choices(data, preference):
 #output: string that gives an ordered list
 
 
+# take final dataframe that is sorted by score values, create output text that will be displayed in discord
 def output_list(data):  
-  # embed = discord.embed(title="Top Foods")
-  # embed.add_field(name="#1: " + {data.iloc[0,1]}, inline=True)
-  # embed.add_field(name="#2: " + {data.iloc[1,1]}, inline=True)
+  output=''
+  output = 'Here are your Top Food Choices:'
 
-  # ctx.send(embed=console_create())
-
-  # return ("#1: " + data.iloc[0,1] + ", " + data.iloc[0,2] + " calories\n#2: " + data.iloc[1,1] + ", " + data.iloc[1,2] + " calories")
-
-  # return(data.iloc[1,0])
-  return 'hi'
-  # return (f'#1: {data.iloc[0,1]}, {data.iloc[0,2]} calories\n#2: " {data.iloc[1,1]}, {data.iloc[1,2]} calories')
-
-
-  
-
-
+  for i in range(len(data.axes[0])): 
+    output += "\n#" + str(i+1) + ": " + str(data.iloc[i,0]) + " - " + str(data.iloc[i,1]) + " calories"
+  return output
 
 #returns the score of given food options for balancing weight
 def weight_score_formula(calorie, protein, saturated_fat, carbohydrate, sugar):
@@ -191,7 +208,6 @@ def weight_score_formula(calorie, protein, saturated_fat, carbohydrate, sugar):
 def percentage_change_formula(actual, initial):
     return (actual-initial)/initial
 
-
 #gets the array and maps the array on a scale of max to min (5 parameters!)
 #takes the value and maps it onto a new scale
 def newMap(oldMin, oldMax, newMin, newMax, value):
@@ -203,7 +219,7 @@ meal_spreadsheet = read_excelfile()
 meal_spreadsheet = add_scores(meal_spreadsheet)
 
 #returns the message the bot should send
-async def handle_response(message: str) -> str:
+def handle_response(message: str) -> str:
     #makes the message all into lowercase
     p_message = message.lower()
     #get the first word of the command, gets the prompt
@@ -211,10 +227,42 @@ async def handle_response(message: str) -> str:
     #correct format for this command: "!food a b c" which starts with '!food' and is 11 chars long
     #this prompt is for getting preferences
 
-    if prompt_message == '!hello':
-        return "Hello! I am MunchMate, your personal food recommendation assistant! I can help you explore what to eat in the Chestnut Residence Dining Hall! To get started, please type '!food' + a number between 0 - 10 based on your preference to gain or lose weight (10 represents that you would like to gain weight, 0 represents that you would like to lose weight, and 5 represents that you would like to maintain weight)"
+    #reset global weight variables
+    calorie_scale = 5
+    protein_scale = -4
+    saturated_fat_scale = 3
+    carbohydrate_scale = 2
+    sugar_scale = 1
 
+    # command that provides user basic info about bot
+    if prompt_message == '!hello':
+        return "Hello! Welcome to MunchMate, your food buddy! \nJust type \"!food\" followed by a number from 0 to 10 to indicate your weight goal. 10 means gaining the most weight, 0 means losing the most weight, and 5 means maintaining weight. I'll suggest tasty options accordingly."
+
+    #get manual input of all the weight variables
+    #!custom <calorie> <protein> <saturated> <carb> <sugar>
+    if prompt_message == '!custom':
+        preferences = get_preference_array(p_message)
+        for i in range(len(preferences)):
+            if (preferences < min_preference or preferences > max_preference):
+                return 'Input Error'
+                
+        selection_spreadsheet = meal_spreadsheet
+
+        #redefine preferences, these variables are global so it should just update to the score function
+        calorie_scale = preferences[0]
+        protein_scale = preferences[1]
+        saturated_fat_scale = preferences[2]
+        carbohydrate_scale = preferences[3]
+        sugar_scale = preferences[4]
+
+        #start loading scores and stuff
+        selection_spreadsheet = select_choices(selection_spreadsheet, preferences)
+
+        print(selection_spreadsheet)
+
+    # food command 
     if prompt_message == '!food':
+        
         #preferences gets one number
         string_input = p_message.split()[1:]
         #future message: catch empty array (i.e someone enters "!food ")!
@@ -225,35 +273,22 @@ async def handle_response(message: str) -> str:
         #get spreadsheet from global variable
         selection_spreadsheet = meal_spreadsheet
         #calculate scores in the spreadsheet
-        #selection_spreadsheet = add_scores(selection_spreadsheet)
+        #selection_spreadsheet = add_scores(meal_spreadsheet)
 
         #sort spreadsheet based on preference
         selection_spreadsheet = select_choices(selection_spreadsheet, preferences)
-
+        
         print(selection_spreadsheet)
+
+        selection_speadsheet = output_list(selection_spreadsheet)
 
         #develop message or embed or whatever
         #actual thingy:
-        #output_message = fuciton(selection_spreadsheet)
 
         #this should be what the bot should say at the end,
-
-      #########################
-  
-        embed = discord.embed(title="Top Food Choices")
-        embed.add_field(name="#1: " + str(selection_spreadsheet.iloc[0,0]), inline=True)
-        embed.add_field(name="#2: " + {data.iloc[1,1]},  value=str(selection_spreadsheet.iloc[0,1]) + " calories", inline=True)
-
-        await ctx.send(embed=console_create())
-
-
-        # ctx.send(embed=console_create())
-
-      ##########################
-  
+   
         #successful return of a table of best options
-        return "Here are your top food choices: \n#1: " + str(selection_spreadsheet.iloc[0,0]) + ", " + str(selection_spreadsheet.iloc[0,1]) + " calories\n#2: " + str(selection_spreadsheet.iloc[1,0]) + ", " + str(selection_spreadsheet.iloc[1,1]) + " calories\n#3: " + str(selection_spreadsheet.iloc[2,0]) + ", " + str(selection_spreadsheet.iloc[2,1]) + " calories"
-        #return output_message
+        return output_list(selection_spreadsheet)
 
         #failed return
         #exit if statement and no return
