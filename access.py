@@ -4,6 +4,6 @@ df=pd.DataFrame(data,columns=["Menu Item", "Serving Size", "Calories", "Saturate
 df=df.dropna()
 df = df[df['Serving Size'] != 'Bowl']
 df = df[df['Serving Size'] != 'Each']
-df=pd.DataFrame(data,columns=["Menu Item", "Calories", "Saturated Fat (g)", "Carbohydrate (g)", "Sugars (g)","Protein (g)"])
 df=df.reset_index(drop=True)
+df=df.drop('Serving Size', axis=1)
 print(df)
